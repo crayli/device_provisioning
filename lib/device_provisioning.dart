@@ -17,27 +17,41 @@ class FrameCtrlBit {
 }
 
 class DataFrameType {
-  static const int _packageValue = 0x01;
-  static const int _Neg = 0x00;
-  static const int _StaWifiBssid = 0x01;
-  static const int _StaWifiSsid = 0x02;
-  static const int _StaWifiPassword = 0x03;
-  static const int _SoftapWifiSsid = 0x04;
-  static const int _SoftapWifiPassword = 0x05;
-  static const int _SoftapMaxConnectionCount = 0x06;
-  static const int _SoftapAuthMode = 0x07;
-  static const int _SoftapChannel = 0x08;
-  static const int _Username = 0x09;
-  static const int _CaCertification = 0x0a;
-  static const int _ClientCertification = 0x0b;
-  static const int _ServerCertification = 0x0c;
-  static const int _ClientPrivateKey = 0x0d;
-  static const int _ServerPrivateKey = 0x0e;
-  static const int _WifiConnectionState = 0x0f;
-  static const int _Version = 0x10;
-  static const int _WifiList = 0x11;
-  static const int _Error = 0x12;
-  static const int _CustomData = 0x13;
+  static const int _typeId = 0x01;
+  static const int _neg = 0x00;
+  static const int _staWifiBssid = 0x01;
+  static const int _staWifiSsid = 0x02;
+  static const int _staWifiPassword = 0x03;
+  static const int _softapWifiSsid = 0x04;
+  static const int _softapWifiPassword = 0x05;
+  static const int _softapMaxConnectionCount = 0x06;
+  static const int _softapAuthMode = 0x07;
+  static const int _softapChannel = 0x08;
+  static const int _username = 0x09;
+  static const int _caCertification = 0x0a;
+  static const int _clientCertification = 0x0b;
+  static const int _serverCertification = 0x0c;
+  static const int _clientPrivateKey = 0x0d;
+  static const int _serverPrivateKey = 0x0e;
+  static const int _wifiConnectionState = 0x0f;
+  static const int _version = 0x10;
+  static const int _wifiList = 0x11;
+  static const int _error = 0x12;
+  static const int _customData = 0x13;
+}
+
+class CtrlFrameType {
+  static const int _typeId = 0x00;
+  static const int _ack = 0x00;
+  static const int _setSecMode = 0x01;
+  static const int _setOpMode = 0x02;
+  static const int _connectWifi = 0x03;
+  static const int _disconnectWifi = 0x04;
+  static const int _getWifiStatus = 0x05;
+  static const int _deauthenticate = 0x06;
+  static const int _getVersion = 0x07;
+  static const int _closeConnection = 0x08;
+  static const int _getWifiList = 0x09;
 }
 
 int _sequenceNumber = 0;
@@ -57,16 +71,17 @@ int getFrameCtrlValue(
 }
 
 List<int> buildReqestMessage(
-    bool encrypt, bool checksum, bool requireAck, int type) {
-  final frameCtrl =
-      getFrameCtrlValue(encrypt, checksum, false, requireAck, false);
+    bool encrypt, bool checksum, bool requireAck, int type, List<int> body) {
+  final frameCtrl = getFrameCtrlValue(encrypt, checksum, false, requireAck, false);
   final sequence = generateSequence();
-  return [type, frameCtrl, sequence, 0];
+  return [type, frameCtrl, sequence, body.length, ...body];
 }
 
 List<(String, int)> constructApInfo(List<int> buffer) {
+  if (buffer.length < 5) throw Exception("Invalid buffer length");
+  if (buffer[0] >> 2 != DataFrameType._wifiList) return [];
   List<(String, int)> ssids = [];
-  for (int i = 0, l = 0; i < buffer.length; i += l + 1) {
+  for (int i = 4, l; i < buffer.length; i += l + 1) {
     l = buffer[i];
     if (l == 0 || i + l > buffer.length) break;
     final rssi = buffer[i + 1].toSigned(8);
@@ -74,6 +89,30 @@ List<(String, int)> constructApInfo(List<int> buffer) {
     ssids.add((ssid, rssi));
   }
   return ssids;
+}
+
+enum WiFiOperationMode {
+  unknown,
+  station,
+  ap,
+  stationAndAp
+}
+
+enum WifiConnectionState {
+  disconnected,
+  connected,
+  connecting,
+  connectedWithoutIp,
+  unknown
+}
+
+(WiFiOperationMode, WifiConnectionState) parseWifiState(List<int> buffer) {
+  if (buffer.length < 5) throw Exception("Invalid buffer length");
+  if (buffer[0] >> 2 != DataFrameType._wifiConnectionState) return (WiFiOperationMode.unknown, WifiConnectionState.unknown);
+
+  final opMode = buffer[0];
+  final state = buffer[1];
+  return (WiFiOperationMode.values[opMode], WifiConnectionState.values[state]);
 }
 
 void handleNotifications(List<int> buffer) {
@@ -92,15 +131,15 @@ void handleNotifications(List<int> buffer) {
 
   // var evtText = "Event: 0x${msgType.toRadixString(16)} not handled yet";
   switch (msgType) {
-    case DataFrameType._WifiConnectionState:
+    case DataFrameType._wifiConnectionState:
       // evtText = "WiFi operation mode: " + ["NULL", "STA", "AP", "STA+AP"][data[0]];
       // if (data[0] == 1) evtText += ", State: " + ["connected", "disconnected", "connecting", "connected(no IP)"][data[1]];
       // evtText += utf8.decode(data.sublist(3)).replaceAll(RegExp(r'[^ -~]+'), ' '); //TODO: check hub code and parse more data
       break;
-    case DataFrameType._Error:
+    case DataFrameType._error:
       // print("Error: ", data[0]);
       break;
-    case DataFrameType._WifiList:
+    case DataFrameType._wifiList:
       break;
     default:
       break;
@@ -114,9 +153,10 @@ class DevProv {
   static const _uuidWriteCharacteristic = "ff01";
   static const _uuidNotificationCahracteristic = "ff02";
 
-  static const _ctrlFrame = 0;
-  static const _dataFrame = 1;
-  static const _scanWifi = (0x09 << 2) | _ctrlFrame;
+  static const _scanWifi = (0x09 << 2) | CtrlFrameType._typeId;
+  static const _configWifiSsid = (DataFrameType._staWifiSsid << 2) | DataFrameType._typeId;
+  static const _configWifiPassword = (DataFrameType._staWifiPassword << 2) | DataFrameType._typeId;
+  static const _connectWifi = (CtrlFrameType._connectWifi << 2) | CtrlFrameType._typeId;
 
   /// Sets the log level
   static Future<void> setLogLevel(LogLevel level, {color = true}) async {
@@ -133,11 +173,35 @@ class DevProv {
     for (BluetoothService s in services) {
       for (BluetoothCharacteristic c in s.characteristics) {
         if (c.uuid == Guid(_uuidWriteCharacteristic)) {
-          List<int> req = buildReqestMessage(false, false, false, _scanWifi);
+          List<int> req =
+              buildReqestMessage(false, false, false, _scanWifi, []);
           await c.write(req);
         } else if (c.uuid == Guid(_uuidNotificationCahracteristic)) {
           await c.setNotifyValue(true);
           if (c.properties.read) await c.read();
+          return c.onValueReceived;
+        }
+      }
+    }
+    throw Exception("Characteristic not found");
+  }
+
+  static Future<Stream<List<int>>> connectWifi(BluetoothDevice device, String ssid, String password) async {
+    List<BluetoothService> services = await device.discoverServices();
+    for (BluetoothService s in services) {
+      for (BluetoothCharacteristic c in s.characteristics) {
+        if (c.uuid == Guid(_uuidWriteCharacteristic)) {
+          const encoder = Utf8Encoder();
+          final ssidBytes = encoder.convert(ssid);
+          final passwordBytes = encoder.convert(password);
+          List<int> req = buildReqestMessage(
+              false, false, false, _configWifiSsid, ssidBytes);
+          await c.write(req);
+          req = buildReqestMessage(
+              false, false, false, _configWifiPassword, passwordBytes);
+          await c.write(req);
+          req = buildReqestMessage(false, false, false, _connectWifi, []);
+          await c.write(req);
           return c.onValueReceived;
         }
       }
