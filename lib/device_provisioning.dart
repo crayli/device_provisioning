@@ -71,7 +71,7 @@ int getFrameCtrlValue(
 }
 
 List<int> buildReqestMessage(
-    bool encrypt, bool checksum, bool requireAck, int type, List<int> body) {
+  bool encrypt, bool checksum, bool requireAck, int type, List<int> body) {
   final frameCtrl = getFrameCtrlValue(encrypt, checksum, false, requireAck, false);
   final sequence = generateSequence();
   return [type, frameCtrl, sequence, body.length, ...body];
@@ -91,7 +91,7 @@ List<(String, int)> constructApInfo(List<int> buffer) {
   return ssids;
 }
 
-enum WiFiOperationMode {
+enum WifiOperationMode {
   unknown,
   station,
   ap,
@@ -99,20 +99,23 @@ enum WiFiOperationMode {
 }
 
 enum WifiConnectionState {
-  disconnected,
   connected,
+  disconnected,
   connecting,
   connectedWithoutIp,
   unknown
 }
 
-(WiFiOperationMode, WifiConnectionState) parseWifiState(List<int> buffer) {
-  if (buffer.length < 5) throw Exception("Invalid buffer length");
-  if (buffer[0] >> 2 != DataFrameType._wifiConnectionState) return (WiFiOperationMode.unknown, WifiConnectionState.unknown);
+(WifiOperationMode, WifiConnectionState) parseWifiState(List<int> buffer) {
+  if (buffer.length < 6) throw Exception("Invalid buffer length");
+  if (buffer[0] >> 2 != DataFrameType._wifiConnectionState) return (WifiOperationMode.unknown, WifiConnectionState.unknown);
 
-  final opMode = buffer[0];
-  final state = buffer[1];
-  return (WiFiOperationMode.values[opMode], WifiConnectionState.values[state]);
+  final opMode = buffer[4];
+  final state = buffer[5];
+  if (state > WifiConnectionState.values.length || opMode >= WifiOperationMode.values.length) {
+    return (WifiOperationMode.unknown, WifiConnectionState.unknown);
+  }
+  return (WifiOperationMode.values[opMode], WifiConnectionState.values[state]);
 }
 
 void handleNotifications(List<int> buffer) {
@@ -167,8 +170,7 @@ class DevProv {
     FlutterBluePlus.startScan(withServices: _services, timeout: timeout);
   }
 
-  static Future<Stream<List<int>>> scanWiFi(BluetoothDevice device,
-      {int timeout = 15}) async {
+  static Future<Stream<List<int>>> scanWiFi(BluetoothDevice device, {int timeout = 15}) async {
     List<BluetoothService> services = await device.discoverServices();
     for (BluetoothService s in services) {
       for (BluetoothCharacteristic c in s.characteristics) {
@@ -178,7 +180,7 @@ class DevProv {
           await c.write(req);
         } else if (c.uuid == Guid(_uuidNotificationCahracteristic)) {
           await c.setNotifyValue(true);
-          if (c.properties.read) await c.read();
+          // if (c.properties.read) await c.read();
           return c.onValueReceived;
         }
       }
@@ -202,6 +204,9 @@ class DevProv {
           await c.write(req);
           req = buildReqestMessage(false, false, false, _connectWifi, []);
           await c.write(req);
+        } else if (c.uuid == Guid(_uuidNotificationCahracteristic)) {
+          await c.setNotifyValue(true);
+          // if (c.properties.read) await c.read();
           return c.onValueReceived;
         }
       }
