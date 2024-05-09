@@ -146,8 +146,14 @@ class _DeviceScreenState extends State<DeviceScreen> {
     try {
       final stream = await DevProv.scanWiFi(widget.device);
       final sub = stream.listen((value) {
-          _ssids = constructApInfo(value.sublist(4));
-          if (mounted) setState(() {});
+          // final result = constructApInfo(value.sublist(4));
+          final result = constructApInfo(value);
+          if (result.isEmpty) return;
+          if (mounted) {
+            setState(() {
+              _ssids = result;
+            });
+          }
       });
       // cleanup: cancel subscription when disconnected
       widget.device.cancelWhenDisconnected(sub);
@@ -187,7 +193,8 @@ class _DeviceScreenState extends State<DeviceScreen> {
         .map(
           (s) => SsidTile(
             ssid: s.$1,
-            rssi: s.$2
+            rssi: s.$2,
+            device: d
           ),
         )
         .toList();
@@ -315,7 +322,7 @@ class _DeviceScreenState extends State<DeviceScreen> {
                 trailing: buildScanWiFi(context),
               ),
               // buildMtuTile(context),
-              // ..._buildServiceTiles(context, widget.device),
+              ..._buildServiceTiles(context, widget.device),
               ..._buildSsidTiles(context, widget.device),
             ],
           ),
