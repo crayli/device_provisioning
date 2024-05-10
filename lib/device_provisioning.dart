@@ -1,6 +1,7 @@
 library device_provisioning;
 
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
@@ -171,6 +172,7 @@ class DevProv {
   }
 
   static Future<Stream<List<int>>> scanWiFi(BluetoothDevice device, {int timeout = 15}) async {
+    if (Platform.isAndroid) await device.requestMtu(223, predelay: 0);
     List<BluetoothService> services = await device.discoverServices();
     for (BluetoothService s in services) {
       for (BluetoothCharacteristic c in s.characteristics) {
